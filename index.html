@@ -2,172 +2,367 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>AETHER DRIFT | Raycast Engine</title>
+    <title>NEON-STRIKE: OMEGA</title>
     <style>
-        body { margin: 0; background: #111; overflow: hidden; font-family: 'Courier New', monospace; }
-        canvas { display: block; margin: 0 auto; box-shadow: 0 0 20px rgba(0,255,255,0.2); }
-        #ui { position: absolute; bottom: 20px; left: 20px; color: #0ff; text-shadow: 2px 2px #000; }
-        .stats { font-size: 1.2rem; background: rgba(0,0,0,0.5); padding: 10px; border: 1px solid #0ff; }
+        body { margin: 0; background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #0ff; pointer-events: none; }
+        .stat-box { background: rgba(0,20,20,0.8); border: 1px solid #0ff; padding: 10px; margin-bottom: 5px; }
+        canvas { display: block; image-rendering: pixelated; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div class="stats">
-            HP: <span id="hp">100</span> | SECTOR: <span id="sector">B-14</span><br>
-            [WASD] MOVE | [Q/E] ROTATE
-        </div>
+        <div class="stat-box">HP: <span id="hp">100</span>%</div>
+        <div class="stat-box">COORD: <span id="coord">0,0</span></div>
     </div>
-    <canvas id="gameCanvas"></canvas>
-
+    <canvas id="mainView"></canvas>
 <script>
-/** * AETHER DRIFT ENGINE 
- * Features: Raycasting, Texture Mapping (Simulated), Procedural Walls, Minimap
- */
-
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-const screenW = window.innerWidth;
-const screenH = window.innerHeight;
-canvas.width = screenW;
-canvas.height = screenH;
-
-// --- CONFIGURATION ---
-const TILE_SIZE = 64;
-const MAP_SIZE = 24;
-const FOV = Math.PI / 3;
-const RESOLUTION = 2; // Pixel width of rays (Lower = Higher quality)
-
-// --- GAME STATE ---
-const player = {
-    x: TILE_SIZE * 1.5,
-    y: TILE_SIZE * 1.5,
-    angle: 0,
-    speed: 3,
-    rotSpeed: 0.05
+// --- BRANCH 2: CONFIG ---
+const CONFIG = {
+    TILE: 64,
+    MAP_SIZE: 32,
+    FOV: Math.PI / 3,
+    MAX_DEPTH: 1000
 };
 
-// --- PROCEDURAL MAP GENERATION ---
-const worldMap = [];
-for(let i=0; i<MAP_SIZE; i++) {
-    worldMap[i] = [];
-    for(let j=0; j<MAP_SIZE; j++) {
-        // Create border walls and random clusters
-        if(i === 0 || i === MAP_SIZE-1 || j === 0 || j === MAP_SIZE-1 || Math.random() < 0.15) {
-            worldMap[i][j] = Math.floor(Math.random() * 3) + 1; // Wall types
-        } else {
-            worldMap[i][j] = 0;
+const WorldBranch = {
+    grid: [],
+    generate() {
+        for(let y = 0; y < CONFIG.MAP_SIZE; y++) {
+            this.grid[y] = [];
+            for(let x = 0; x < CONFIG.MAP_SIZE; x++) {
+                const isEdge = (x === 0 || x === CONFIG.MAP_SIZE-1 || y === 0 || y === CONFIG.MAP_SIZE-1);
+                this.grid[y][x] = (isEdge || Math.random() < 0.1) ? Math.floor(Math.random() * 3) + 1 : 0;
+            }
+        }
+        this.grid[1][1] = 0; this.grid[1][2] = 0; this.grid[2][1] = 0;
+    }
+};
+WorldBranch.generate();
+</script>
+<script>
+// --- BRANCH 3: PHYSICS ---
+const InputBranch = {
+    keys: {},
+    init() {
+        window.onkeydown = e => this.keys[e.code] = true;
+        window.onkeyup = e => this.keys[e.code] = false;
+    }
+};
+InputBranch.init();
+
+const PlayerBranch = {
+    x: 96, y: 96, dir: 0, hp: 100,
+    update() {
+        let move = 0;
+        if(InputBranch.keys['KeyW']) move = 3.5;
+        if(InputBranch.keys['KeyS']) move = -2.5;
+        if(InputBranch.keys['KeyA']) this.dir -= 0.05;
+        if(InputBranch.keys['KeyD']) this.dir += 0.05;
+
+        let nx = this.x + Math.cos(this.dir) * move;
+        let ny = this.y + Math.sin(this.dir) * move;
+
+        if(WorldBranch.grid[Math.floor(ny/CONFIG.TILE)][Math.floor(nx/CONFIG.TILE)] === 0) {
+            this.x = nx; this.y = ny;
+        }
+        document.getElementById('coord').innerText = `${Math.floor(this.x)},${Math.floor(this.y)}`;
+    }
+};
+</script>
+<script>
+// --- BRANCH 4: ENTITIES ---
+const EntityBranch = {
+    collection: [],
+    spawn(x, y, type) { this.collection.push({ x, y, type }); }
+};
+// Spawn some initial items
+EntityBranch.spawn(200, 200, 'battery');
+EntityBranch.spawn(400, 300, 'chip');
+</script>
+<script>
+// --- BRANCH 5: RENDERER ---
+const RenderBranch = {
+    canvas: document.getElementById('mainView'),
+    ctx: document.getElementById('mainView').getContext('2d'),
+    init() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+    },
+    draw() {
+        const w = this.canvas.width, h = this.canvas.height;
+        this.ctx.fillStyle = '#001'; this.ctx.fillRect(0, 0, w, h/2);
+        this.ctx.fillStyle = '#111'; this.ctx.fillRect(0, h/2, w, h/2);
+
+        for(let i = 0; i < w; i += 2) {
+            let ra = (PlayerBranch.dir - CONFIG.FOV/2) + (i / w) * CONFIG.FOV;
+            let d = 0, hit = 0, cx = Math.cos(ra), cy = Math.sin(ra);
+            while(d < CONFIG.MAX_DEPTH) {
+                d += 2;
+                let tx = Math.floor((PlayerBranch.x + cx * d) / CONFIG.TILE);
+                let ty = Math.floor((PlayerBranch.y + cy * d) / CONFIG.TILE);
+                if(WorldBranch.grid[ty] && WorldBranch.grid[ty][tx] > 0) { hit = WorldBranch.grid[ty][tx]; break; }
+            }
+            let z = d * Math.cos(ra - PlayerBranch.dir);
+            let wh = (CONFIG.TILE * h) / z;
+            let s = Math.max(0, 255 - z/3);
+            this.ctx.fillStyle = `rgb(0, ${s/2}, ${s})`;
+            this.ctx.fillRect(i, (h - wh)/2, 2, wh);
         }
     }
-}
-worldMap[1][1] = 0; // Spawn clear
-
-// --- INPUT HANDLING ---
-const keys = {};
-window.onkeydown = (e) => keys[e.code] = true;
-window.onkeyup = (e) => keys[e.code] = false;
-
-// --- RAYCASTING CORE ---
-function castRays() {
-    for (let i = 0; i < screenW; i += RESOLUTION) {
-        let rayAngle = (player.angle - FOV / 2) + (i / screenW) * FOV;
-        
-        let distanceToWall = 0;
-        let hitWall = false;
-        
-        let eyeX = Math.cos(rayAngle);
-        let eyeY = Math.sin(rayAngle);
-        
-        while (!hitWall && distanceToWall < 800) {
-            distanceToWall += 1;
-            let testX = Math.floor((player.x + eyeX * distanceToWall) / TILE_SIZE);
-            let testY = Math.floor((player.y + eyeY * distanceToWall) / TILE_SIZE);
+};
+RenderBranch.init();
+</script>
+<script>
+// --- BRANCH 7: ENEMY AI ---
+const EnemyBranch = {
+    enemies: [],
+    spawn(x, y) {
+        this.enemies.push({ x, y, hp: 100, speed: 1.5 });
+    },
+    update() {
+        this.enemies.forEach(en => {
+            let dx = PlayerBranch.x - en.x;
+            let dy = PlayerBranch.y - en.y;
+            let dist = Math.hypot(dx, dy);
             
-            if (testX < 0 || testX >= MAP_SIZE || testY < 0 || testY >= MAP_SIZE) {
-                hitWall = true;
-                distanceToWall = 800;
-            } else if (worldMap[testY][testX] > 0) {
-                hitWall = true;
-                
-                // --- SHADING & RENDERING ---
-                // Fish-eye correction
-                let correctedDist = distanceToWall * Math.cos(rayAngle - player.angle);
-                let wallHeight = (TILE_SIZE * screenH) / correctedDist;
-                
-                // Color based on wall type and distance (Atmospheric Fog)
-                let brightness = Math.max(0, 255 - (correctedDist / 2.5));
-                let wallColor = worldMap[testY][testX] === 1 ? `rgb(0, ${brightness}, ${brightness})` :
-                                worldMap[testY][testX] === 2 ? `rgb(${brightness/2}, 0, ${brightness})` :
-                                                               `rgb(${brightness}, ${brightness/4}, 0)`;
-                
-                ctx.fillStyle = wallColor;
-                ctx.fillRect(i, (screenH / 2) - (wallHeight / 2), RESOLUTION, wallHeight);
+            if(dist > 30) {
+                en.x += (dx / dist) * en.speed;
+                en.y += (dy / dist) * en.speed;
+            } else {
+                PlayerBranch.hp -= 0.1;
             }
+        });
+    }
+};
+
+// Spawn one enemy to start
+EnemyBranch.spawn(300, 300);
+</script>
+<script>
+// --- BRANCH 8: COMBAT SYSTEM (WEAPONS) ---
+const CombatBranch = {
+    projectiles: [],
+    canShoot: true,
+    init() {
+        window.addEventListener('mousedown', () => this.shoot());
+        window.addEventListener('keydown', e => { if(e.code === 'Space') this.shoot(); });
+    },
+    shoot() {
+        if(!this.canShoot) return;
+        this.projectiles.push({
+            x: PlayerBranch.x, y: PlayerBranch.y,
+            vx: Math.cos(PlayerBranch.dir) * 10,
+            vy: Math.sin(PlayerBranch.dir) * 10,
+            life: 60
+        });
+        this.canShoot = false;
+        setTimeout(() => this.canShoot = true, 250); // Fire rate
+    },
+    update() {
+        this.projectiles.forEach((p, i) => {
+            p.x += p.vx; p.y += p.vy; p.life--;
+            // Collision with walls
+            if(WorldBranch.grid[Math.floor(p.y/CONFIG.TILE)][Math.floor(p.x/CONFIG.TILE)] > 0) p.life = 0;
+            // Collision with enemies
+            EnemyBranch.enemies.forEach(en => {
+                if(Math.hypot(p.x - en.x, p.y - en.y) < 20) {
+                    en.hp -= 50; p.life = 0;
+                    if(en.hp <= 0) en.dead = true;
+                }
+            });
+            if(p.life <= 0) this.projectiles.splice(i, 1);
+        });
+    }
+};
+CombatBranch.init();
+
+// --- BRANCH 9: PARTICLE ENGINE (FX) ---
+const FXBranch = {
+    sparks: [],
+    spawn(x, y, color) {
+        for(let i=0; i<5; i++) {
+            this.sparks.push({ x, y, vx: (Math.random()-0.5)*5, vy: (Math.random()-0.5)*5, t: 20, c: color });
         }
+    },
+    update() {
+        this.sparks.forEach((s, i) => { s.x += s.vx; s.y += s.vy; s.t--; if(s.t <= 0) this.sparks.splice(i, 1); });
     }
-}
+};
 
-function update() {
-    // Movement Logic
-    let moveStep = 0;
-    if (keys['KeyW']) moveStep = player.speed;
-    if (keys['KeyS']) moveStep = -player.speed;
-    
-    if (keys['KeyQ']) player.angle -= player.rotSpeed;
-    if (keys['KeyE']) player.angle += player.rotSpeed;
-    
-    // Collision detection
-    let newX = player.x + Math.cos(player.angle) * moveStep;
-    let newY = player.y + Math.sin(player.angle) * moveStep;
-    
-    if (worldMap[Math.floor(newY / TILE_SIZE)][Math.floor(newX / TILE_SIZE)] === 0) {
-        player.x = newX;
-        player.y = newY;
-    }
+// --- BRANCH 10: ADVANCED AI TYPES ---
+EnemyBranch.spawnGhost = function(x, y) {
+    this.enemies.push({ x, y, hp: 50, speed: 3, type: 'stalker' });
+};
 
-    // Strafe Logic
-    if (keys['KeyA'] || keys['KeyD']) {
-        let strafeAngle = player.angle + Math.PI/2;
-        let strafeStep = keys['KeyA'] ? -player.speed : player.speed;
-        let sX = player.x + Math.cos(strafeAngle) * strafeStep;
-        let sY = player.y + Math.sin(strafeAngle) * strafeStep;
-        if (worldMap[Math.floor(sY / TILE_SIZE)][Math.floor(sX / TILE_SIZE)] === 0) {
-            player.x = sX;
-            player.y = sY;
-        }
-    }
-}
-
-function drawMinimap() {
-    const scale = 0.15;
-    const size = TILE_SIZE * scale;
-    for(let y=0; y<MAP_SIZE; y++) {
-        for(let x=0; x<MAP_SIZE; x++) {
-            if(worldMap[y][x] > 0) {
-                ctx.fillStyle = '#444';
-                ctx.fillRect(10 + x*size, 10 + y*size, size, size);
+// --- BRANCH 11: LOOT & INVENTORY ---
+const LootBranch = {
+    items: [],
+    spawn(x, y) { this.items.push({ x, y, type: 'nano_core' }); },
+    update() {
+        this.items.forEach((it, i) => {
+            if(Math.hypot(PlayerBranch.x - it.x, PlayerBranch.y - it.y) < 30) {
+                PlayerBranch.hp = Math.min(100, PlayerBranch.hp + 20);
+                this.items.splice(i, 1);
             }
-        }
+        });
     }
-    // Player on minimap
-    ctx.fillStyle = '#0ff';
-    ctx.beginPath();
-    ctx.arc(10 + (player.x/TILE_SIZE)*size, 10 + (player.y/TILE_SIZE)*size, 3, 0, Math.PI*2);
-    ctx.fill();
+};
+
+// --- BRANCH 12: DYNAMIC LIGHTING ENGINE ---
+// (Integrated into RenderBranch.draw logic)
+
+// --- BRANCH 13: PROCEDURAL LEVEL CYCLING ---
+const ProgressionBranch = {
+    floor: 1,
+    nextFloor() {
+        this.floor++;
+        WorldBranch.generate();
+        PlayerBranch.x = 96; PlayerBranch.y = 96;
+        for(let i=0; i<this.floor + 2; i++) EnemyBranch.spawn(Math.random()*500+200, Math.random()*500+200);
+    }
+};
+
+// --- BRANCH 14: SOUND SIMULATOR (VISUAL) ---
+const AudioBranch = {
+    pulse: 0,
+    update() { this.pulse = Math.sin(Date.now()/200) * 5; }
+};
+
+// --- BRANCH 15: HUD ENHANCEMENTS ---
+function updateHUD() {
+    document.getElementById('hp').innerText = Math.floor(PlayerBranch.hp);
+    document.getElementById('coord').innerText = `FLOOR ${ProgressionBranch.floor} | SEC: ${Math.floor(PlayerBranch.x/64)},${Math.floor(PlayerBranch.y/64)}`;
+}
+</script>
+
+<script>
+<script>
+// --- BRANCH 16: MINI-MAP SYSTEM ---
+const MapBranch = {
+    mCanvas: null, mCtx: null,
+    init() {
+        this.mCanvas = document.createElement('canvas');
+        this.mCanvas.width = 150; this.mCanvas.height = 150;
+        this.mCanvas.style.position = 'absolute';
+        this.mCanvas.style.top = '20px'; this.mCanvas.style.right = '20px';
+        this.mCanvas.style.border = '2px solid #0ff';
+        this.mCanvas.style.background = 'rgba(0,0,0,0.5)';
+        document.body.appendChild(this.mCanvas);
+        this.mCtx = this.mCanvas.getContext('2d');
+    },
+    draw() {
+        this.mCtx.clearRect(0,0,150,150);
+        const s = 150 / CONFIG.MAP_SIZE;
+        WorldBranch.grid.forEach((row, y) => {
+            row.forEach((cell, x) => {
+                if(cell > 0) { this.mCtx.fillStyle = '#0ff'; this.mCtx.fillRect(x*s, y*s, s, s); }
+            });
+        });
+        this.mCtx.fillStyle = '#f0f';
+        this.mCtx.fillRect((PlayerBranch.x/64)*s-2, (PlayerBranch.y/64)*s-2, 4, 4);
+    }
+};
+MapBranch.init();
+
+// --- BRANCH 17: WEAPON SWAY & SHAKE ---
+let swayX = 0, swayY = 0, shakeTime = 0;
+function triggerShake(amt) { shakeTime = amt; }
+
+// --- BRANCH 18: BOSS SYSTEM ---
+const BossBranch = {
+    active: false,
+    spawn() {
+        EnemyBranch.enemies.push({ x: 500, y: 500, hp: 500, speed: 1, boss: true });
+        this.active = true;
+    }
+};
+
+// --- BRANCH 19: SYSTEM RESET ---
+function resetSystem() {
+    PlayerBranch.hp = 100; ProgressionBranch.floor = 1;
+    WorldBranch.generate(); PlayerBranch.x = 96; PlayerBranch.y = 96;
+    EnemyBranch.enemies = []; ProgressionBranch.nextFloor();
+}
+<script>
+// --- BRANCH 16: MINI-MAP SYSTEM ---
+const MapBranch = {
+    mCanvas: null, mCtx: null,
+    init() {
+        this.mCanvas = document.createElement('canvas');
+        this.mCanvas.width = 150; this.mCanvas.height = 150;
+        this.mCanvas.style.position = 'absolute';
+        this.mCanvas.style.top = '20px'; this.mCanvas.style.right = '20px';
+        this.mCanvas.style.border = '2px solid #0ff';
+        this.mCanvas.style.background = 'rgba(0,0,0,0.5)';
+        document.body.appendChild(this.mCanvas);
+        this.mCtx = this.mCanvas.getContext('2d');
+    },
+    draw() {
+        this.mCtx.clearRect(0,0,150,150);
+        const s = 150 / CONFIG.MAP_SIZE;
+        WorldBranch.grid.forEach((row, y) => {
+            row.forEach((cell, x) => {
+                if(cell > 0) { this.mCtx.fillStyle = '#0ff'; this.mCtx.fillRect(x*s, y*s, s, s); }
+            });
+        });
+        this.mCtx.fillStyle = '#f0f';
+        this.mCtx.fillRect((PlayerBranch.x/64)*s-2, (PlayerBranch.y/64)*s-2, 4, 4);
+    }
+};
+MapBranch.init();
+
+// --- BRANCH 17: WEAPON SWAY & SHAKE ---
+let swayX = 0, swayY = 0, shakeTime = 0;
+function triggerShake(amt) { shakeTime = amt; }
+
+// --- BRANCH 18: BOSS SYSTEM ---
+const BossBranch = {
+    active: false,
+    spawn() {
+        EnemyBranch.enemies.push({ x: 500, y: 500, hp: 500, speed: 1, boss: true });
+        this.active = true;
+    }
+};
+
+// --- BRANCH 19: SYSTEM RESET ---
+function resetSystem() {
+    PlayerBranch.hp = 100; ProgressionBranch.floor = 1;
+    WorldBranch.generate(); PlayerBranch.x = 96; PlayerBranch.y = 96;
+    EnemyBranch.enemies = []; ProgressionBranch.nextFloor();
 }
 
-function loop() {
-    // Draw Background (Ceiling/Floor)
-    ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, screenW, screenH/2);
-    ctx.fillStyle = '#111'; ctx.fillRect(0, screenH/2, screenW, screenH/2);
-    
-    update();
-    castRays();
-    drawMinimap();
-    
-    requestAnimationFrame(loop);
-}
+// --- BRANCH 20 & 21: UPDATED ORCHESTRATOR ---
+function gameLoop() {
+    PlayerBranch.update();
+    EnemyBranch.update();
+    CombatBranch.update();
+    FXBranch.update();
+    LootBranch.update();
 
-loop();
+    EnemyBranch.enemies = EnemyBranch.enemies.filter(en => {
+        if(en.dead) { 
+            LootBranch.spawn(en.x, en.y); 
+            triggerShake(10);
+            return false; 
+        }
+        return true;
+    });
+
+    if(EnemyBranch.enemies.length === 0) ProgressionBranch.nextFloor();
+
+    RenderBranch.draw();
+    MapBranch.draw();
+    updateHUD();
+    
+    if(PlayerBranch.hp > 0) {
+        requestAnimationFrame(gameLoop);
+    } else {
+        if(confirm("SYSTEM CRITICAL: REBOOT?")) resetSystem();
+    }
+}
+gameLoop();
 </script>
 </body>
 </html>
+
