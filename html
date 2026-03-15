@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AETHER DRIFT | Raycast Engine</title>
+    <style>
+        body { margin: 0; background: #111; overflow: hidden; font-family: 'Courier New', monospace; }
+        canvas { display: block; margin: 0 auto; box-shadow: 0 0 20px rgba(0,255,255,0.2); }
+        #ui { position: absolute; bottom: 20px; left: 20px; color: #0ff; text-shadow: 2px 2px #000; }
+        .stats { font-size: 1.2rem; background: rgba(0,0,0,0.5); padding: 10px; border: 1px solid #0ff; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stats">
+            HP: <span id="hp">100</span> | SECTOR: <span id="sector">B-14</span><br>
+            [WASD] MOVE | [Q/E] ROTATE
+        </div>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+/** * AETHER DRIFT ENGINE 
+ * Features: Raycasting, Texture Mapping (Simulated), Procedural Walls, Minimap
+ */
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const screenW = window.innerWidth;
+const screenH = window.innerHeight;
+canvas.width = screenW;
+canvas.height = screenH;
+
+// --- CONFIGURATION ---
+const TILE_SIZE = 64;
+const MAP_SIZE = 24;
+const FOV = Math.PI / 3;
+const RESOLUTION = 2; // Pixel width of rays (Lower = Higher quality)
+
+// --- GAME STATE ---
+const player = {
+    x: TILE_SIZE * 1.5,
+    y: TILE_SIZE * 1.5,
+    angle: 0,
+    speed: 3,
+    rotSpeed: 0.05
+};
+
+// --- PROCEDURAL MAP GENERATION ---
+const worldMap = [];
+for(let i=0; i<MAP_SIZE; i++) {
+    worldMap[i] = [];
+    for(let j=0; j<MAP_SIZE; j++) {
+        // Create border walls and random clusters
+        if(i === 0 || i === MAP_SIZE-1 || j === 0 || j === MAP_SIZE-1 || Math.random() < 0.15) {
+            worldMap[i][j] = Math.floor(Math.random() * 3) + 1; // Wall types
+        } else {
+            worldMap[i][j] = 0;
+        }
+    }
+}
+worldMap[1][1] = 0; // Spawn clear
+
+// --- INPUT HANDLING ---
+const keys = {};
+window.onkeydown = (e) => keys[e.code] = true;
+window.onkeyup = (e) => keys[e.code] = false;
+
+// --- RAYCASTING CORE ---
+function castRays() {
+    for (let i = 0; i < screenW; i += RESOLUTION) {
+        let rayAngle = (player.angle - FOV / 2) + (i / screenW) * FOV;
+        
+        let distanceToWall = 0;
+        let hitWall = false;
+        
+        let eyeX = Math.cos(rayAngle);
+        let eyeY = Math.sin(rayAngle);
+        
+        while (!hitWall && distanceToWall < 800) {
+            distanceToWall += 1;
+            let testX = Math.floor((player.x + eyeX * distanceToWall) / TILE_SIZE);
+            let testY = Math.floor((player.y + eyeY * distanceToWall) / TILE_SIZE);
+            
+            if (testX < 0 || testX >= MAP_SIZE || testY < 0 || testY >= MAP_SIZE) {
+                hitWall = true;
+                distanceToWall = 800;
+            } else if (worldMap[testY][testX] > 0) {
+                hitWall = true;
+                
+                // --- SHADING & RENDERING ---
+                // Fish-eye correction
+                let correctedDist = distanceToWall * Math.cos(rayAngle - player.angle);
+                let wallHeight = (TILE_SIZE * screenH) / correctedDist;
+                
+                // Color based on wall type and distance (Atmospheric Fog)
+                let brightness = Math.max(0, 255 - (correctedDist / 2.5));
+                let wallColor = worldMap[testY][testX] === 1 ? `rgb(0, ${brightness}, ${brightness})` :
+                                worldMap[testY][testX] === 2 ? `rgb(${brightness/2}, 0, ${brightness})` :
+                                                               `rgb(${brightness}, ${brightness/4}, 0)`;
+                
+                ctx.fillStyle = wallColor;
+                ctx.fillRect(i, (screenH / 2) - (wallHeight / 2), RESOLUTION, wallHeight);
+            }
+        }
+    }
+}
+
+function update() {
+    // Movement Logic
+    let moveStep = 0;
+    if (keys['KeyW']) moveStep = player.speed;
+    if (keys['KeyS']) moveStep = -player.speed;
+    
+    if (keys['KeyQ']) player.angle -= player.rotSpeed;
+    if (keys['KeyE']) player.angle += player.rotSpeed;
+    
+    // Collision detection
+    let newX = player.x + Math.cos(player.angle) * moveStep;
+    let newY = player.y + Math.sin(player.angle) * moveStep;
+    
+    if (worldMap[Math.floor(newY / TILE_SIZE)][Math.floor(newX / TILE_SIZE)] === 0) {
+        player.x = newX;
+        player.y = newY;
+    }
+
+    // Strafe Logic
+    if (keys['KeyA'] || keys['KeyD']) {
+        let strafeAngle = player.angle + Math.PI/2;
+        let strafeStep = keys['KeyA'] ? -player.speed : player.speed;
+        let sX = player.x + Math.cos(strafeAngle) * strafeStep;
+        let sY = player.y + Math.sin(strafeAngle) * strafeStep;
+        if (worldMap[Math.floor(sY / TILE_SIZE)][Math.floor(sX / TILE_SIZE)] === 0) {
+            player.x = sX;
+            player.y = sY;
+        }
+    }
+}
+
+function drawMinimap() {
+    const scale = 0.15;
+    const size = TILE_SIZE * scale;
+    for(let y=0; y<MAP_SIZE; y++) {
+        for(let x=0; x<MAP_SIZE; x++) {
+            if(worldMap[y][x] > 0) {
+                ctx.fillStyle = '#444';
+                ctx.fillRect(10 + x*size, 10 + y*size, size, size);
+            }
+        }
+    }
+    // Player on minimap
+    ctx.fillStyle = '#0ff';
+    ctx.beginPath();
+    ctx.arc(10 + (player.x/TILE_SIZE)*size, 10 + (player.y/TILE_SIZE)*size, 3, 0, Math.PI*2);
+    ctx.fill();
+}
+
+function loop() {
+    // Draw Background (Ceiling/Floor)
+    ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, screenW, screenH/2);
+    ctx.fillStyle = '#111'; ctx.fillRect(0, screenH/2, screenW, screenH/2);
+    
+    update();
+    castRays();
+    drawMinimap();
+    
+    requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
