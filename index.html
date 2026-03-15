@@ -354,15 +354,15 @@ function gameLoop() {
     RenderBranch.draw();
     MapBranch.draw();
     updateHUD();
-    
-    if(PlayerBranch.hp > 0) {
+       if(PlayerBranch.hp > 0) {
         requestAnimationFrame(gameLoop);
     } else {
-        if(confirm("SYSTEM CRITICAL: REBOOT?")) resetSystem();
+        if(confirm("SYSTEM CRITICAL: REBOOT?")) {
+            resetSystem();
+            gameLoop(); // This line restarts the engine
+        }
     }
 }
 gameLoop();
-</script>
-</body>
-</html>
-
+ 
+    
